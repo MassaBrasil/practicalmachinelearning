@@ -1,5 +1,5 @@
 ---
-title: "Practical Machine Learning Course Project"
+title: "Practical Machine Learning Course Project - prediction of exercise correctness based on movement data"
 author: "Masahiro Hiramatsu"
 date: "10 de dezembro de 2017"
 output: html_document
@@ -9,22 +9,227 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+```{r }
+Sys.time()
+```
+## Introduction  ##
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+We live in an age that means to collect large amound of data about specific observations such personal activities are availabe to average people - Using devices available for purchasing such as JawboneUp, NikeFuelBand, and Fitbitit (or further devices) and   relatively inexpensive budget. We have available data collected on study that aimed to quantify movement of some volunteers, enthusiasts that have taken measures regularly and to analyze them,aiming to find clues for health improvement, by finding  patterns. 
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+A distinct aspect of this project is to focus the point people usually does not pay attention - instead of quantifying a particular activity they do, it focuses in QUALIFYING how well they do it.
 
-```{r cars}
-summary(cars)
+This project used data from `accelerometers` on the `belt`, `forearm`, `arm`, and `dumbell` of 6 participants; they performed barbell lifts - correctly and incorrectly in 5 different ways. 
+
+More information is available from the [website](http://groupware.les.inf.puc-rio.br/har) (see details in the section on the 'Weight Lifting Exercise Dataset').
+
+## Data ##
+
+Data are made available, as below:
+
+Training data: [https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv). 
+
+Test data: [https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv). 
+
+These data were produced by mentioned project - [http://groupware.les.inf.puc-rio.br/har](http://groupware.les.inf.puc-rio.br/har). 
+
+As requested and understood by me, if I "... use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment", I would also like to join to students of this courser - Practice Machine Learning in Coursera.org - to forward our appreciation  for the project team for kindly sharing their document for the course, I encourage forthcoming fellows to follow and value such act of sharing and supportiveness among research community.
+
+#loads of package, data, checks/explorations
+
+Using caret package, data are loaded - training and testing data:
+
+```{r read csv}
+library(caret);
+set.seed(12345)
+
+# downloads below were done once at the beginning and inhibited, from now on, 
+# execution will take files already downloaded locally.
+#
+# url_train <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+# download.file(url_train,"pml-training.csv")
+# trying URL 'http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
+# Content type 'text/csv' length 12202745 bytes (11.6 MB)
+# downloaded 11.6 MB
+#
+# url_test <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+# download.file(url_test,"pml-testing.csv")
+# trying URL 'http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
+# Content type 'text/csv' length 15113 bytes (14 KB)
+# downloaded 14 KB
+#
+setwd("C:/coursera/07 Practical Machine Learning/assignment/practicalmachinelearning")
+
+pml_train <-read.csv("./pml-training.csv", header=TRUE)
+dim(pml_train)
+
+pml_test <- read.csv("./pml-testing.csv", header=TRUE)
+dim(pml_test)
+
 ```
 
-## Including Plots
+Except for the last column of both dataset, train and test,  compare them and confirm they are the same in both. 
 
-You can also embed plots, for example:
+# Compare columns if are equal in both datasets
+```{r compare columns}
+colnames_test <- colnames(pml_test)
+colnames_train <- colnames(pml_train)
+all.equal(colnames_train[1:length(colnames_train)-1],colnames_test[1:length(colnames_train)-1])
+```
+In case dataset columns are equal, function above yields TRUE, otherwise we could stop at this point and go back working on them.
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+# Remove NA from data set
+There are some columns that have value NA. 
+Decision taken in this project was to get rid in both of those columns having 50% or more rows in training dataset.
+```{r remove NA}
+Perc50ofNA    <- sapply(pml_train, function(x) mean(is.na(x))) >= 0.50
+pml_train <- pml_train[, Perc50ofNA==FALSE]
+pml_test  <- pml_test[, Perc50ofNA==FALSE]
+dim(pml_train)
+dim(pml_test)
+```
+# Remove near zero variables
+Still, there are close to 150 or more columns (predictors), having a glance on dataset summary, there are a number of them with zero.
+Here we decided to use near zero variance function to track and drop them from dataset.
+```{r remove nzv cols}
+nzv_pml_train <- nearZeroVar(pml_train, saveMetrics=TRUE)
+pml_train <- pml_train[,nzv_pml_train$nzv==FALSE]
+pml_test <- pml_test[,nzv_pml_train$nzv==FALSE]
+dim(pml_train)
+dim(pml_test)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+# Remove columns non-candidate as predictor
+At this point, we also can get rid of those columns as row/windows numbers, experiment individual alias, timestamps :
+```{r non-predictor cols}
+pml_train <- pml_train[, -(1:7)]
+pml_test <- pml_test[, -(1:7)]
+dim(pml_train)
+dim(pml_test)
+```
+
+
+# Split training dataset in two : 1 for training, 2 for validation 
+Because I want to be able to estimate the out-of-sample error, I randomly split the full training data (ptrain) into a smaller training set (ptrain1) and a validation set (ptrain2):
+
+```{r split training in train and validation}
+inTrain <- createDataPartition(y=pml_train$classe, p=0.7, list=F);
+pml_train_1 <- pml_train[inTrain, ];
+pml_train_2 <- pml_train[-inTrain, ];
+dim(pml_train_1)
+dim(pml_train_2)
+```
+
+# Modeling
+Data were cleaned up, we are ready to proceed in modeling.
+
+The kind of problem of this assignment is of classification. From this point, the task here is to enlist identified prediction methods and components involved.
+
+Below we can find those gathered to meet this goal: 
+
+- decision tree (rpart)
+- gradient boosting (gbm)
+- random forest (rf)
+- combination of two most accurate models 
+
+## Model evaluation 
+
+
+### Cross validation
+Cross validation was specified Using trainControl function, with fold number set to 34 to achieve sample size between not so few chunks and not many but with in small size.
+
+```{r setup parallel package }
+
+library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 2) 
+# convention to leave 1 core for OS
+
+registerDoParallel(cluster)
+```
+
+```{r set traincontrol}
+# train control
+trControl <- trainControl(method = "cv", number = 5, allowParallel=TRUE)
+```
+
+```{r train rf}
+# build model
+set.seed(2457)
+Sys.time()
+mod_rf <- train(classe~., method="rf", trControl=trControl,pml_train_1, verbose=FALSE)
+Sys.time() 
+```
+
+```{r de-reguster paralel processing }
+stopCluster(cluster)
+registerDoSEQ()
+```
+
+```{r predicting in-sample error}
+predict_rf <- predict(mod_rf, pml_train_2)
+```
+
+# Using confusion Matrix to test results:
+
+```{r confusion matrix to check accuracy}
+cm_rf <- confusionMatrix(predict_rf, pml_train_2$classe)
+```
+
+```{r Decision Tree}
+mod_dt <- train(classe~., method="rpart", trControl=trControl, pml_train_1)
+library(rattle)
+
+fancyRpartPlot(mod_dt$finalModel)
+```
+
+Prediction Tree
+```{r prediction for decision tree}
+predict_dt <- predict(mod_dt, newdata=pml_train_2)
+cm_dt <- confusionMatrix(predict_dt, pml_train_2$classe)
+```
+
+# modeling with GBM
+```{r modeling GBM }
+Sys.time()
+mod_gbm <- train(classe~., method="gbm", trControl=trControl, pml_train_1,verbose=FALSE)
+Sys.time()
+```
+
+```{r predicting with GBM}
+predict_gbm <- predict(mod_gbm, newdata=pml_train_2)
+cm_gbm <- confusionMatrix(predict_gbm, pml_train_2$classe)
+``` 
+
+#Combining RF and GBM - modeling and predict
+```{r comb RF GBM}
+comb_DF <- data.frame(predict_rf,predict_gbm,classe=pml_train_2$classe)
+comb_ModFit <- train(classe~.,method="gam",data=comb_DF, verbose=FALSE)
+pred_DF <- predict(comb_ModFit,comb_DF)
+```
+
+```{r accuracy - combination}
+cm_comb <- confusionMatrix(pred_DF, pml_train_2$classe)
+
+Sys.time()
+```
+
+
+# Conclusion - Predicting Results on the Test Data
+
+The accuracy found on 4 regression modeling methods seen above were:
+
+Random Forest : `r  cm_rf$overall[1]`
+Decision Tree : `r  cm_dt$overall[1]`
+GBM           : `r  cm_gbm$overall[1]`
+combine rf+GBM: `r  cm_comb$overall[1]`
+
+Thus, the one with highest accuracy, i.e. Random Forest model, is applied to predict the 20 quiz results from testing dataset.
+
+```{r Conclusion}
+predict_test <- predict(mod_rf, newdata=pml_test)
+predict_test
+```
+
+For the model chosen, expected out-of-sample error found was 1.0-`r  cm_rf$overall[1]` = `r 1.0 - cm_rf$overall[1]` %.
+
+(Report generated at `r Sys.time() `)
