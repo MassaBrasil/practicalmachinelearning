@@ -1,6 +1,6 @@
 ---
 title: "Practical Machine Learning Course Project - prediction of exercise correctness based on movement data"
-author: "Masahiro Hiramatsu"
+author: "Massabrasil"
 date: "10 de dezembro de 2017"
 output: html_document
 ---
@@ -34,7 +34,7 @@ These data were produced by mentioned project - [http://groupware.les.inf.puc-ri
 
 As requested and understood by me, if I "... use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment", I would also like to join to students of this courser - Practice Machine Learning in Coursera.org - to forward our appreciation  for the project team for kindly sharing their document for the course, I encourage forthcoming fellows to follow and value such act of sharing and supportiveness among research community.
 
-#loads of package, data, checks/explorations
+# Loading dataset
 
 Using caret package, data are loaded - training and testing data:
 
@@ -69,7 +69,7 @@ dim(pml_test)
 
 Except for the last column of both dataset, train and test,  compare them and confirm they are the same in both. 
 
-# Compare columns if are equal in both datasets
+# Ensure predictors are comparable in both dataset
 ```{r compare columns}
 colnames_test <- colnames(pml_test)
 colnames_train <- colnames(pml_train)
@@ -77,7 +77,10 @@ all.equal(colnames_train[1:length(colnames_train)-1],colnames_test[1:length(coln
 ```
 In case dataset columns are equal, function above yields TRUE, otherwise we could stop at this point and go back working on them.
 
-# Remove NA from data set
+# Data cleansing
+
+## Remove NA from data set
+
 There are some columns that have value NA. 
 Decision taken in this project was to get rid in both of those columns having 50% or more rows in training dataset.
 ```{r remove NA}
@@ -87,7 +90,7 @@ pml_test  <- pml_test[, Perc50ofNA==FALSE]
 dim(pml_train)
 dim(pml_test)
 ```
-# Remove near zero variables
+## Remove near zero variables
 Still, there are close to 150 or more columns (predictors), having a glance on dataset summary, there are a number of them with zero.
 Here we decided to use near zero variance function to track and drop them from dataset.
 ```{r remove nzv cols}
@@ -98,7 +101,7 @@ dim(pml_train)
 dim(pml_test)
 ```
 
-# Remove columns non-candidate as predictor
+## Remove columns non-candidate as predictor
 At this point, we also can get rid of those columns as row/windows numbers, experiment individual alias, timestamps :
 ```{r non-predictor cols}
 pml_train <- pml_train[, -(1:7)]
@@ -107,8 +110,9 @@ dim(pml_train)
 dim(pml_test)
 ```
 
+# Data cleansing/slicing
 
-# Split training dataset in two : 1 for training, 2 for validation 
+## Split training dataset in one subset (training) and another (validation)
 Because I want to be able to estimate the out-of-sample error, I randomly split the full training data (ptrain) into a smaller training set (ptrain1) and a validation set (ptrain2):
 
 ```{r split training in train and validation}
@@ -120,6 +124,7 @@ dim(pml_train_2)
 ```
 
 # Modeling
+
 Data were cleaned up, we are ready to proceed in modeling.
 
 The kind of problem of this assignment is of classification. From this point, the task here is to enlist identified prediction methods and components involved.
@@ -129,14 +134,16 @@ Below we can find those gathered to meet this goal:
 - decision tree (rpart)
 - gradient boosting (gbm)
 - random forest (rf)
-- combination of two most accurate models 
 
-## Model evaluation 
+## Cross validation 
+Cross validation was specified Using trainControl function, with fold number arbitrarily set to 5 folds, as a way to achieve balance between number of foldings and data subset size.
+```{r set traincontrol}
+# train control
+trControl <- trainControl(method = "cv", number = 5, allowParallel=TRUE)
+```
 
-
-### Cross validation
-Cross validation was specified Using trainControl function, with fold number set to 34 to achieve sample size between not so few chunks and not many but with in small size.
-
+## setup of processing cluster 
+As attempt to speedup processing of train() with method "rf" (randon forest), advice from Len Gretsky was followed, setting up cluster in the session.
 ```{r setup parallel package }
 
 library(parallel)
@@ -147,29 +154,25 @@ cluster <- makeCluster(detectCores() - 2)
 registerDoParallel(cluster)
 ```
 
-```{r set traincontrol}
-# train control
-trControl <- trainControl(method = "cv", number = 5, allowParallel=TRUE)
-```
+# Modeling
+
+## Randon Forest
 
 ```{r train rf}
 # build model
-set.seed(2457)
+
 Sys.time()
 mod_rf <- train(classe~., method="rf", trControl=trControl,pml_train_1, verbose=FALSE)
 Sys.time() 
+
 ```
 
-```{r de-reguster paralel processing }
-stopCluster(cluster)
-registerDoSEQ()
-```
 
 ```{r predicting in-sample error}
 predict_rf <- predict(mod_rf, pml_train_2)
 ```
 
-# Using confusion Matrix to test results:
+## Random Forest: Confusion Matrix - accuracy
 
 ```{r confusion matrix to check accuracy}
 cm_rf <- confusionMatrix(predict_rf, pml_train_2$classe)
@@ -188,48 +191,48 @@ predict_dt <- predict(mod_dt, newdata=pml_train_2)
 cm_dt <- confusionMatrix(predict_dt, pml_train_2$classe)
 ```
 
-# modeling with GBM
+## GBM
+
 ```{r modeling GBM }
 Sys.time()
 mod_gbm <- train(classe~., method="gbm", trControl=trControl, pml_train_1,verbose=FALSE)
 Sys.time()
 ```
 
+## GBM: Confusion Matrix - accuracy
+
 ```{r predicting with GBM}
 predict_gbm <- predict(mod_gbm, newdata=pml_train_2)
 cm_gbm <- confusionMatrix(predict_gbm, pml_train_2$classe)
 ``` 
 
-#Combining RF and GBM - modeling and predict
-```{r comb RF GBM}
-comb_DF <- data.frame(predict_rf,predict_gbm,classe=pml_train_2$classe)
-comb_ModFit <- train(classe~.,method="gam",data=comb_DF, verbose=FALSE)
-pred_DF <- predict(comb_ModFit,comb_DF)
+## Un-registering parallel processing cluster
+```{r de-reguster paralel processing }
+stopCluster(cluster)
+registerDoSEQ()
 ```
 
-```{r accuracy - combination}
-cm_comb <- confusionMatrix(pred_DF, pml_train_2$classe)
-
-Sys.time()
-```
-
-
-# Conclusion - Predicting Results on the Test Data
+# Conclusion
+## Method with highest accuracy and prediction using testing dataset
 
 The accuracy found on 4 regression modeling methods seen above were:
 
 Random Forest : `r  cm_rf$overall[1]`
+
 Decision Tree : `r  cm_dt$overall[1]`
+
 GBM           : `r  cm_gbm$overall[1]`
-combine rf+GBM: `r  cm_comb$overall[1]`
+
 
 Thus, the one with highest accuracy, i.e. Random Forest model, is applied to predict the 20 quiz results from testing dataset.
+
+## Testing result
 
 ```{r Conclusion}
 predict_test <- predict(mod_rf, newdata=pml_test)
 predict_test
 ```
 
-For the model chosen, expected out-of-sample error found was 1.0-`r  cm_rf$overall[1]` = `r 1.0 - cm_rf$overall[1]` %.
+For the model chosen, expected out-of-sample error found was 1.0-`r  cm_rf$overall[1]` = `r 1.0 - cm_rf$overall[1]`, i.e. `r (1.0 - cm_rf$overall[1]) * 100.0`  %.
 
 (Report generated at `r Sys.time() `)
