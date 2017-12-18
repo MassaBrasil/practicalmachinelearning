@@ -1,7 +1,7 @@
 ---
 title: "Practical Machine Learning Course Project - prediction of exercise correctness based on movement data"
 author: "Massabrasil"
-date: "10 de dezembro de 2017"
+date: "10th december 2017"
 output: html_document
 ---
 
@@ -156,8 +156,9 @@ registerDoParallel(cluster)
 
 # Modeling
 
-## Randon Forest
+## Random Forest
 
+### Training
 ```{r train rf}
 # build model
 
@@ -166,18 +167,19 @@ mod_rf <- train(classe~., method="rf", trControl=trControl,pml_train_1, verbose=
 Sys.time() 
 
 ```
-
-
+### Predicting
 ```{r predicting in-sample error}
 predict_rf <- predict(mod_rf, pml_train_2)
 ```
 
-## Random Forest: Confusion Matrix - accuracy
-
+### Confusion Matrix - accuracy
 ```{r confusion matrix to check accuracy}
 cm_rf <- confusionMatrix(predict_rf, pml_train_2$classe)
+cm_rf
 ```
+## Decision Tree
 
+### Training / plotting
 ```{r Decision Tree}
 mod_dt <- train(classe~., method="rpart", trControl=trControl, pml_train_1)
 library(rattle)
@@ -185,28 +187,39 @@ library(rattle)
 fancyRpartPlot(mod_dt$finalModel)
 ```
 
-Prediction Tree
-```{r prediction for decision tree}
+### Predicting
+```{r predicting for decision tree}
 predict_dt <- predict(mod_dt, newdata=pml_train_2)
-cm_dt <- confusionMatrix(predict_dt, pml_train_2$classe)
 ```
 
-## GBM
+### Confusion Matrix - accuracy
+```{r prediction for decision tree}
+cm_dt <- confusionMatrix(predict_dt, pml_train_2$classe)
+cm_dt
+```
 
+
+
+## GBM  (Generalized Boosted Regression)
+
+### Training
 ```{r modeling GBM }
 Sys.time()
 mod_gbm <- train(classe~., method="gbm", trControl=trControl, pml_train_1,verbose=FALSE)
 Sys.time()
 ```
 
-## GBM: Confusion Matrix - accuracy
-
-```{r predicting with GBM}
+### Predicting
+```{r predicting for decision tree}
 predict_gbm <- predict(mod_gbm, newdata=pml_train_2)
+```
+### Confusion Matrix - accuracy
+```{r predicting with GBM}
 cm_gbm <- confusionMatrix(predict_gbm, pml_train_2$classe)
+cm_gbm
 ``` 
 
-## Un-registering parallel processing cluster
+## Un-registering parallel processing cluster (i.e. freeing resources)
 ```{r de-reguster paralel processing }
 stopCluster(cluster)
 registerDoSEQ()
@@ -215,7 +228,7 @@ registerDoSEQ()
 # Conclusion
 ## Method with highest accuracy and prediction using testing dataset
 
-The accuracy found on 4 regression modeling methods seen above were:
+The accuracy found on selected regression modeling methods seen above were:
 
 Random Forest : `r  cm_rf$overall[1]`
 
